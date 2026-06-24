@@ -280,12 +280,6 @@ CSS=r"""
 .is-active .check-item{animation:cardSlideUp 0.4s ease both}
 .is-active .obj-card-prof{animation:cardSlideUp 0.4s ease both}
 .is-active .archi-module{animation:cardSlideUp 0.4s ease both}
-
-/* === Enhanced Animations === */
-.content-card:hover{transform:translateY(-3px)!important;box-shadow:0 8px 24px rgba(0,0,0,0.08)!important}
-.check-item:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,0.06)}
-.step-unit:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,0.06)}
-.obj-card-prof:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,0.06)}
 """
 
 def build(d,dd=None):
