@@ -1,0 +1,20 @@
+﻿{
+  "name": "autoteach-video",
+  "version": "1.0.0",
+  "description": "AI教学文本 → 精美PPT → 教学视频 全自动生成流水线",
+  "license": "MIT",
+  "skills": {
+    "autoteach-video": {
+      "name": "autoteach-video",
+      "description": "将AI教学文本自动生成为HTML教学PPT，并录制为带语音旁白的MP4教学视频。",
+      "triggers": [
+        "教学视频", "AI教学", "PPT生成", "视频录制",
+        "teaching video", "auto ppt", "text2video"
+      ]
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pephupephu/Codex_autoteach-video-skill"
+  }
+}
