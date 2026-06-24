@@ -7,6 +7,11 @@ __pycache__/
 D:/codex/teach-output/
 teach-output/
 
+# Temp files
+*.v7
+*.txt
+new_css.txt
+
 # OS
 Thumbs.db
 .DS_Store
