@@ -1,334 +1,635 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""AI教学文本 -> 精美HTML教学PPT 生成器（v7 - 专业设计版）"""
-import json, os, re, sys, random
+"""AI教学文本 -> 视频原生精美HTML幻灯片（专业设计版v8）
+
+设计理念：
+  - 视频优先：无PPT界面元素（页码、页眉、页脚、进度点）
+  - 每页一个核心概念，逐步呈现（步进式揭示）
+  - 内容驱动布局：代码/步骤/架构/总结各有专属视觉设计
+  - 无AI痕迹：不使用emoji图标、有色左边框卡片、紫蓝渐变
+  - 大标题排版（80px+），充足留白，SVG/Canvas视觉演示
+"""
+import json, os, re, sys, random, math
 from datetime import datetime
 from pathlib import Path
 random.seed(42)
 
-def fa():
-    c=[Path.home()/".codex"/"skills"/"html-ppt"/"assets",Path(os.environ.get("CODEX_HOME",""))/"skills"/"html-ppt"/"assets"]
-    for p in c:
-        if(p/"themes").is_dir()and(p/"runtime.js").exists():return p.resolve()
-    raise FileNotFoundError("html-ppt assets not found")
-SKILL_A=fa()
-ALL_T=["academic-paper","aurora","bauhaus","blueprint","catppuccin-mocha","corporate-clean","cyberpunk-neon","dracula","editorial-serif","glassmorphism","japanese-minimal","magazine-bold","memphis-pop","midcentury","minimal-white","neo-brutalism","news-broadcast","nord","pitch-deck-vc","rainbow-gradient","retro-tv","rose-pine","sharp-mono","soft-pastel","solarized-light","sunset-warm","swiss-grid","terminal-green","tokyo-night","vaporwave","xiaohongshu-white","y2k-chrome","engineering-whiteprint","gruvbox-dark","catppuccin-latte"]
-DT="tokyo-night"
-def esc(t):return t.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
-def deco(s):return bool(re.match(r"^[=\-*]{3,}$",s.strip()))
-def icon(k):
-    m={"环境|配置|设置|安装|部署|setup|install":"⚙️","代码|示例|实现|函数|code|example|api":"💻","目标|大纲|学习|objectives|goal":"🎯","总结|小结|回顾|summary":"📝","注意|警告|提示|tip|note":"⚠️","数据|架构|设计|structure":"🏗️","步骤|流程|工作流|step|workflow":"🔄","常见问题|faq|q&a":"❓","验证|测试|检查|test|verify":"✅","维护|运维|日常":"🔧","卸载|清理|remove":"🗑️","启动|访问|run|start":"🚀","集成|integration|skill":"🧩","算法|聚类|affinity":"🧮","更新|升级|update":"🔄","备份|backup":"💾","硬件|内存|磁盘|cpu":"🖥️"}
-    for p,i in m.items():
-        if re.search(p,k,re.I):return i
-    return "📌"
-def col(i):
-    cs=["#6366f1","#ec4899","#14b8a6","#f59e0b","#8b5cf6","#06b6d4","#84cc16","#f97316","#e11d48","#0ea5e9"]
-    return cs[i%len(cs)]
-def pmd(t):
-    ls=t.strip().split("\n")
-    dt="AI教学课程"
-    for r in ls:
-        s=r.strip()
-        if s and not deco(s)and not s.startswith("目录")and not s.startswith("END"):
-            dt=s.strip("*#\t ");break
-    it=False;rs=[];se=set()
-    i=0
-    while i<len(ls):
-        r=ls[i];s=r.strip()
-        if not s:i+=1;continue
-        if s=="目录："or s.startswith("目录"):it=True;i+=1;continue
-        if deco(s):it=False;i+=1;continue
-        if r.startswith("## "):
-            h=r[3:].strip()
-            if h and h not in se:rs.append((i,h));se.add(h)
-            i+=1;continue
-        if re.match(r"^[一二三四五六七八九十]+[、\.\)]\s*\S",s):
-            pd=False
-            for j in range(i-1,-1,-1):
-                p=ls[j].strip()
-                if deco(p):pd=True;break
-                if p:break
-            if pd and not it and s not in se:rs.append((i,s));se.add(s)
-            i+=1;continue
-        i+=1
-    if not rs:
-        b=[{"type":"text","text":l.strip()}for l in ls if l.strip()and not deco(l)]
-        return{"title":dt,"slides":[{"title":dt,"type":"cover","body":b[:8]}]}
-    sl=[]
-    cb=[]
-    for r in ls[:rs[0][0]]:
-        s=r.strip()
-        if s and not deco(s)and not s.startswith("目录")and not s.startswith("END"):
-            cb.append({"type":"text","text":s})
-    if cb:sl.append({"title":dt,"type":"cover","body":cb})
-    for si,(sl_,h)in enumerate(rs):
-        el=rs[si+1][0] if si+1<len(rs)else len(ls)
-        tl=h.lower()
-        tp="content"
-        if any(k in tl for k in["环境","配置","设置","requirements"]):tp="setup"
-        elif any(k in tl for k in["代码","示例","实现","安装","code"]):tp="code"
-        elif any(k in tl for k in["总结","小结","回顾","收尾","summary","conclusion","常见问题","faq"]):tp="summary"
-        elif any(k in tl for k in["目标","大纲","学习目标","objectives"]):tp="objectives"
-        elif any(k in tl for k in["注意","警告","提示","tip","重要"]):tp="callout"
-        elif any(k in tl for k in["步骤","流程","工作流"]):tp="steps"
-        elif any(k in tl for k in["架构","设计","结构"]):tp="architecture"
-        bd=[];ic=False;cb_=None;hc=False
-        for j in range(sl_+1,el):
-            r=ls[j];s=r.strip()
-            if not s or deco(s):continue
-            if s.startswith("```"):
-                if ic and cb_:bd.append({"type":"code","lang":"text","content":"\n".join(cb_)});cb_=None;hc=True
-                ic=not ic
-                if ic:cb_=[]
-                continue
-            if ic and cb_ is not None:cb_.append(r.rstrip());continue
-            if s.startswith(("- ","* ","+ ")):bd.append({"type":"bullet","text":s[2:].strip()});hc=True;continue
-            if re.match(r"^\d+[\.\)]\s",s):bd.append({"type":"bullet","text":s});hc=True;continue
-            if s.startswith("【")and"】"in s:bd.append({"type":"text","text":"■ "+s.strip("【】")});hc=True;continue
-            if s.startswith("|")and s.endswith("|"):
-                cl=[c.strip()for c in s.strip("|").split("|")]
-                if len(cl)>=2:bd.append({"type":"table_row","cols":cl});hc=True
-                continue
-            bd.append({"type":"text","text":s});hc=True
-        if hc or si==len(rs)-1:sl.append({"title":h,"type":tp,"body":bd})
-    return{"title":dt,"slides":sl}
-def bcover(s,i,n,t):
-    bd=s.get("body",[]);ic=icon(t)
-    mt=[it["text"]for it in bd[:4]]
-    sb=mt[1]if len(mt)>=2 else""
-    ln=[f'  <section class="slide cover-slide" data-title="{esc(t)}">']
-    ln.append('    <div class="cover-gradient"></div>')
-    ln.append("""    <div class="cover-pattern">""" + "".join(f'<div class="deco-shape" style="left:{random.randint(3,94)}%;top:{random.randint(5,90)}%;width:{random.choice([40,60,80,120])}px;height:{random.choice([40,60,80,120])}px;animation-delay:{random.uniform(0,2):.1f}s;border-radius:{random.choice(["50%","30%","10%","40% 60%"])}"></div>' for _ in range(5)) + """</div>""")
-    ln.append('    <div class="cover-content">')
-    ln.append(f'      <div class="cover-icon-wrap"><span class="cover-icon">{ic}</span></div>')
-    ln.append('      <div class="cover-badge">AI教学课程</div>')
-    ln.append(f'      <h1 class="cover-title">{esc(t)}</h1>')
-    if sb:ln.append(f'      <p class="cover-subtitle">{esc(sb)}</p>')
-    ln.append('      <div class="cover-divider"></div>')
-    ln.append(f'      <div class="cover-meta"><span class="meta-item">📅 {datetime.now().strftime("%Y-%m-%d")}</span><span class="meta-item">📄 {n}页</span></div>')
-    ln.append('    </div><div class="cover-bar"></div></section>')
-    return"\n".join(ln)
-def bdivider(s,i,n,t):
-    ic=icon(s["title"])
-    return f'  <section class="slide divider-slide" data-title="{esc(s["title"])}"><div class="divider-bg"></div><div class="divider-content"><span class="divider-num">{i}</span><span class="divider-icon">{ic}</span><h2 class="divider-title">{esc(s["title"])}</h2><div class="divider-line"></div></div></section>'
-def bcontent(s,i,n,t):
-    bd=s.get("body",[]);tp=s["type"];st=s["title"]
-    ic=icon(st)
-    ln=[f'  <section class="slide" data-title="{esc(st)}">']
-    ln.append('    <div class="slide-ambient"><div class="ambient-1"></div><div class="ambient-2"></div></div>')
-    ln.append(f'    <div class="slide-header-bar"><span class="header-icon">{ic}</span><span class="header-title">{esc(st)}</span><span class="header-dots">{"".join(["●"if _==i else"○"for _ in range(n)])}</span><span class="header-num">{i}/{n}</span></div>')
-    bu=[it for it in bd if it["type"]=="bullet"];tx=[it for it in bd if it["type"]=="text"]
-    cd=[it for it in bd if it["type"]=="code"];tb=[it for it in bd if it["type"]=="table_row"]
-    if tp=="code":
-        ln.append('    <div class="code-window"><div class="code-titlebar"><span class="win-dot r"></span><span class="win-dot y"></span><span class="win-dot g"></span><span class="win-label">'+esc(st)+'</span></div>')
-        if tx:ln.append(f'      <div class="code-intro">{esc(tx[0]["text"])}</div>')
-        for c in cd:ln.append(f'      <pre class="code-content"><code>{esc(c["content"])}</code></pre>')
-        for b in bu:ln.append(f'      <div class="code-note"><span class="note-arrow">➜</span>{esc(b["text"])}</div>')
-        ln.append('    </div>')
-    elif tp=="summary":
-        ln.append(f'    <div class="summary-section"><h2 class="section-title-anim"><span class="title-icon">📋</span> {esc(st)}</h2><div class="check-grid">')
-        for b in bu:ln.append(f'        <div class="check-item"><span class="check-mark">✓</span><span>{esc(b["text"])}</span></div>')
-        for t in tx:ln.append(f'        <div class="check-item info"><span class="check-mark info">i</span><span>{esc(t["text"])}</span></div>')
-        ln.append('      </div></div>')
-    elif tp in("setup","steps"):
-        ln.append(f'    <div class="steps-section"><h2 class="section-title-anim"><span class="title-icon">{ic}</span> {esc(st)}</h2><div class="steps-flow">')
-        for idx,b in enumerate(bu):
-            cc=col(idx);ln.append(f'        <div class="step-unit" style="--sc:{cc}"><div class="step-badge" style="background:{cc}">{idx+1}</div><div class="step-content">{esc(b["text"])}</div></div>')
-        for t in tx:ln.append(f'        <div class="step-unit info"><div class="step-badge info">i</div><div class="step-content">{esc(t["text"])}</div></div>')
-        ln.append('      </div></div>')
-    elif tp=="callout":
-        ln.append('    <div class="callout-section"><div class="callout-box-big"><div class="callout-ico">⚠️</div><h3>'+esc(st)+'</h3>')
-        for t in tx:ln.append(f'        <p>{esc(t["text"])}</p>')
-        for b in bu:ln.append(f'        <div class="callout-bullet">• {esc(b["text"])}</div>')
-        ln.append('      </div></div>')
-    elif tp=="architecture":
-        ln.append(f'    <div class="archi-section"><h2 class="section-title-anim"><span class="title-icon">{ic}</span> {esc(st)}</h2><div class="archi-grid">')
-        for idx,b in enumerate(bu):
-            cc=col(idx);ln.append(f'        <div class="archi-module" style="--mc:{cc};border-color:{cc}40"><div class="archi-hd" style="background:{cc}15;color:{cc}">{esc(b["text"])}</div></div>')
-        for t in tx:ln.append(f'        <div class="archi-module"><div class="archi-hd">{esc(t["text"])}</div></div>')
-        ln.append('      </div></div>')
-    elif tp=="objectives":
-        ln.append(f'    <div class="obj-section"><h2 class="section-title-anim"><span class="title-icon">🎯</span> {esc(st)}</h2><div class="obj-grid-prof">')
-        ai=bu+[{"text":t["text"]}for t in tx]
-        for idx,it in enumerate(ai):
-            em=["🎯","💡","⭐","🔑","📌","🏆"][idx%6];cc=col(idx)
-            ln.append(f'        <div class="obj-card-prof" style="border-left-color:{cc}"><span class="obj-emoji-prof">{em}</span><span>{esc(it.get("text",""))}</span></div>')
-        ln.append('      </div></div>')
-    else:
-        ln.append(f'    <div class="content-section"><h2 class="section-title-anim"><span class="title-icon">{ic}</span> {esc(st)}</h2>')
-        if tb:
-            ln.append('      <div class="table-deck"><table class="pro-table">')
-            for it in tb:
-                cl=" thr"if it==tb[0]else""
-                ln.append(f'        <tr class="{cl}">{"".join(f"<td>{esc(c)}</td>"for c in it["cols"])}</tr>')
-            ln.append('      </table></div>')
-        if len(bu)>6:
-            md=(len(bu)+1)//2
-            ln.append('      <div class="two-col-cards"><div class="col-cards">')
-            for idx,b in enumerate(bu[:md]):
-                cc=col(idx);em=["🚀","💡","🎯","🔧","📊","🛡️","⚡","🎨"][idx%8]
-                ln.append(f'          <div class="content-card" style="--cc:{cc}"><span class="card-emoji">{em}</span><span>{esc(b["text"])}</span></div>')
-            ln.append('        </div><div class="col-cards">')
-            for idx,b in enumerate(bu[md:]):
-                cc=col(idx+md);em=["🚀","💡","🎯","🔧","📊","🛡️","⚡","🎨"][(idx+md)%8]
-                ln.append(f'          <div class="content-card" style="--cc:{cc}"><span class="card-emoji">{em}</span><span>{esc(b["text"])}</span></div>')
-            ln.append('        </div></div>')
-        elif bu:
-            ln.append('      <div class="cards-stack">')
-            for idx,b in enumerate(bu):
-                cc=col(idx);em=["🚀","💡","🎯","🔧","📊","🛡️","⚡","🎨"][idx%8]
-                ln.append(f'        <div class="content-card" style="--cc:{cc}"><span class="card-emoji">{em}</span><span>{esc(b["text"])}</span></div>')
-            ln.append('      </div>')
-        for t in tx:
-            if t["text"].startswith("■"):ln.append(f'      <div class="tag-badge">{esc(t["text"][2:])}</div>')
-            else:ln.append(f'      <p class="body-text">{esc(t["text"])}</p>')
-        for c in cd:ln.append(f'      <pre class="inline-code-block"><code>{esc(c["content"])}</code></pre>')
-        ln.append('    </div>')
-    ln.append('  </section>')
-    return"\n".join(ln)
-CSS=r"""
-.slide{position:absolute;top:0;left:0;width:1920px;height:1080px;display:none;overflow:hidden;box-sizing:border-box;background:var(--surface);color:var(--text-1)}
-.slide.is-active{display:flex;flex-direction:column;z-index:10}
-.slide-ambient{position:absolute;top:0;left:0;right:0;bottom:0;pointer-events:none;overflow:hidden}
-.ambient-1{position:absolute;top:-15%;right:-10%;width:70%;height:70%;border-radius:50%;background:radial-gradient(circle,var(--accent)0%,transparent 70%);opacity:0.05}
-.ambient-2{position:absolute;bottom:-10%;left:-10%;width:50%;height:50%;border-radius:50%;background:radial-gradient(circle,color-mix(in srgb,var(--accent)60%,#fff)0%,transparent 70%);opacity:0.03}
-.slide-header-bar{position:absolute;top:0;left:0;right:0;height:48px;display:flex;align-items:center;padding:0 48px;gap:12px;z-index:20;background:linear-gradient(180deg,var(--surface-2)0%,transparent 100%);border-bottom:1px solid var(--border);animation:headerSlide 0.5s ease both}
-.header-icon{font-size:18px}
-.header-title{font-size:14px;font-weight:600;color:var(--text-2);letter-spacing:0.5px}
-.header-dots{margin-left:auto;font-size:10px;color:var(--text-3);letter-spacing:4px}
-.header-num{font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--text-3);opacity:0.6}
-.deco-shape{position:absolute;border:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.02);animation:floatShape 8s ease-in-out infinite;pointer-events:none}
-.cover-slide{background:var(--accent)!important;position:relative}
-.cover-gradient{position:absolute;top:0;left:0;right:0;bottom:0;background:linear-gradient(135deg,var(--accent)0%,color-mix(in srgb,var(--accent)25%,#0d0d1a)100%)}
-.cover-pattern{position:absolute;top:0;left:0;right:0;bottom:0;overflow:hidden}
-.cover-content{position:relative;z-index:5;margin:auto;text-align:center;padding:60px 100px}
-.cover-icon-wrap{display:inline-flex;width:80px;height:80px;border-radius:50%;align-items:center;justify-content:center;background:rgba(255,255,255,0.12);backdrop-filter:blur(10px);margin-bottom:16px;animation:iconBounce 1s cubic-bezier(0.34,1.56,0.64,1) both}
-.cover-icon{font-size:38px}
-.cover-badge{display:inline-block;padding:6px 24px;border:1px solid rgba(255,255,255,0.2);border-radius:20px;font-size:12px;color:rgba(255,255,255,0.5);letter-spacing:3px;text-transform:uppercase;margin-bottom:20px;animation:fadeSlideUp 0.6s ease 0.2s both}
-.cover-title{font-size:64px;font-weight:800;letter-spacing:-2.5px;color:#fff;margin:0 0 12px;line-height:1.08;text-shadow:0 4px 40px rgba(0,0,0,0.15);animation:fadeSlideUp 0.7s ease 0.3s both}
-.cover-subtitle{font-size:22px;color:rgba(255,255,255,0.6);margin:0 auto 20px;max-width:800px;line-height:1.6;animation:fadeSlideUp 0.6s ease 0.4s both}
-.cover-divider{width:60px;height:3px;background:rgba(255,255,255,0.2);margin:24px auto;border-radius:2px;animation:scaleW 0.6s ease 0.5s both}
-.cover-meta{display:flex;justify-content:center;gap:32px;font-size:13px;color:rgba(255,255,255,0.35);animation:fadeSlideUp 0.6s ease 0.6s both}
-.meta-item{display:flex;align-items:center;gap:6px}
-.cover-bar{position:absolute;bottom:0;left:0;right:0;height:3px;background:linear-gradient(90deg,rgba(255,255,255,0.4),transparent)}
-.divider-slide{position:relative}
-.divider-bg{position:absolute;top:0;left:0;right:0;bottom:0;background:var(--surface-2)}
-.divider-content{margin:auto;text-align:center;position:relative;z-index:2;padding:40px}
-.divider-num{display:block;font-size:80px;font-weight:900;color:var(--accent);opacity:0.12;font-family:"JetBrains Mono",monospace;line-height:1;margin-bottom:8px}
-.divider-icon{font-size:48px;display:block;margin-bottom:12px}
-.divider-title{font-size:52px;font-weight:700;color:var(--text-1);margin:0;letter-spacing:-1px}
-.divider-line{width:100px;height:3px;background:var(--accent);margin:20px auto 0;border-radius:2px}
-.content-section,.steps-section,.summary-section,.obj-section,.archi-section,.code-window,.callout-section{padding-top:52px;flex:1;overflow-y:auto;padding-left:48px;padding-right:40px}
-.section-title-anim{font-size:32px;font-weight:700;letter-spacing:-0.5px;color:var(--text-1);margin:8px 0 20px;padding-bottom:12px;display:flex;align-items:center;gap:10px;border-bottom:2px solid var(--accent);width:fit-content;min-width:30%;animation:titleSlide 0.5s ease both}
-.title-icon{font-size:28px}
-.cards-stack{display:flex;flex-direction:column;gap:10px;max-width:95%}
-.content-card{display:flex;align-items:center;gap:16px;padding:14px 22px;background:var(--surface-2);border-radius:10px;font-size:20px;line-height:1.5;border:1px solid var(--border);border-left:4px solid var(--cc,#6366f1);box-shadow:0 2px 8px rgba(0,0,0,0.04);transition:all 0.3s;animation:cardSlideUp 0.5s ease both}
-.content-card:hover{transform:translateY(-2px);box-shadow:0 4px 16px rgba(0,0,0,0.08)}
-.card-emoji{font-size:22px;flex-shrink:0}
-.two-col-cards{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.col-cards{display:flex;flex-direction:column;gap:10px}
-.body-text{font-size:18px;line-height:1.7;color:var(--text-2);margin:6px 0}
-.tag-badge{display:inline-flex;align-items:center;gap:6px;padding:6px 16px;background:var(--surface-2);border-radius:6px;margin:4px 0;font-size:14px;font-weight:600;color:var(--accent);border:1px solid var(--border)}
-.steps-flow{display:flex;flex-direction:column;gap:8px;max-width:90%}
-.step-unit{display:flex;align-items:center;gap:16px;padding:14px 20px;background:var(--surface-2);border-radius:10px;border:1px solid var(--border);border-left:3px solid var(--sc,#6366f1);animation:cardSlideUp 0.4s ease both}
-.step-badge{flex-shrink:0;width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-family:"JetBrains Mono",monospace;font-size:14px;font-weight:800;color:#fff}
-.step-badge.info{background:var(--text-3)}
-.step-content{font-size:18px;color:var(--text-1);line-height:1.5}
-.step-unit.info{border-left-color:var(--text-3)}
-.check-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;max-width:95%}
-.check-item{display:flex;align-items:center;gap:14px;padding:14px 18px;background:var(--surface-2);border-radius:8px;font-size:17px;line-height:1.5;border:1px solid var(--border);animation:cardSlideUp 0.4s ease both}
-.check-mark{flex-shrink:0;width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700}
-.check-mark.info{background:var(--text-3);font-style:italic}
-.obj-grid-prof{display:grid;grid-template-columns:1fr 1fr;gap:10px;max-width:95%}
-.obj-card-prof{display:flex;align-items:center;gap:14px;padding:16px 20px;background:var(--surface-2);border-radius:10px;font-size:17px;line-height:1.5;border:1px solid var(--border);border-left:4px solid var(--clr,#6366f1);box-shadow:0 2px 6px rgba(0,0,0,0.04);animation:cardSlideUp 0.4s ease both}
-.obj-emoji-prof{font-size:24px;flex-shrink:0}
-.callout-section{display:flex;align-items:center;justify-content:center}
-.callout-box-big{max-width:880px;width:100%;padding:36px 44px;background:var(--surface-2);border-radius:16px;border:2px solid var(--accent);box-shadow:0 8px 32px rgba(0,0,0,0.06);animation:popIn 0.5s ease both}
-.callout-ico{font-size:48px;margin-bottom:8px}
-.callout-box-big h3{font-size:28px;color:var(--accent);margin:0 0 16px}
-.callout-box-big p{font-size:19px;line-height:1.7;color:var(--text-1);margin:8px 0}
-.callout-bullet{font-size:18px;color:var(--text-2);margin:6px 0;padding-left:16px}
-.code-window{padding-top:52px;max-width:92%}
-.code-titlebar{display:flex;align-items:center;gap:8px;padding:10px 18px;background:#1a1a2e;border-radius:10px 10px 0 0;border-bottom:1px solid rgba(255,255,255,0.05)}
-.win-dot{width:12px;height:12px;border-radius:50%}
-.win-dot.r{background:#ff5f57}
-.win-dot.y{background:#febc2e}
-.win-dot.g{background:#28c840}
-.win-label{margin-left:auto;font-size:12px;color:rgba(255,255,255,0.25);font-family:"JetBrains Mono",monospace}
-.code-content{background:#1a1a2e;color:#e4e4e7;padding:20px 24px;margin:0;font-family:"JetBrains Mono","Fira Code",monospace;font-size:13.5px;line-height:1.7;overflow-x:auto;border-radius:0 0 10px 10px;border:1px solid rgba(255,255,255,0.03)}
-.code-intro{font-size:17px;color:var(--text-2);margin:8px 0}
-.code-note{font-size:15px;color:var(--text-3);margin:6px 0;font-family:"JetBrains Mono",monospace}
-.note-arrow{color:var(--accent);margin-right:6px}
-.archi-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;max-width:95%}
-.archi-module{border:2px solid var(--border);border-radius:10px;overflow:hidden;background:var(--surface-2);animation:cardSlideUp 0.4s ease both}
-.archi-hd{padding:14px 16px;font-size:17px;font-weight:600}
-.table-deck{margin:12px 0;max-width:95%;overflow-x:auto}
-.pro-table{width:100%;border-collapse:separate;border-spacing:0;font-size:15px}
-.pro-table td{padding:10px 16px;border-bottom:1px solid var(--border);color:var(--text-2)}
-.pro-table .thr td{background:var(--surface-2);font-weight:600;color:var(--text-1);border-top:2px solid var(--accent)}
-.inline-code-block{background:#1a1a2e;border-radius:8px;padding:14px 18px;margin:8px 0;font-family:"JetBrains Mono",monospace;font-size:13px;overflow-x:auto;color:#e4e4e7}
-@keyframes floatShape{0%,100%{transform:translate(0,0)rotate(0deg)}33%{transform:translate(15px,-15px)rotate(5deg)}66%{transform:translate(-10px,10px)rotate(-3deg)}}
-@keyframes iconBounce{0%{opacity:0;transform:scale(0.3)rotate(-10deg)}50%{transform:scale(1.1)rotate(3deg)}70%{transform:scale(0.9)}100%{opacity:1;transform:scale(1)rotate(0)}}
-@keyframes fadeSlideUp{from{opacity:0;transform:translateY(25px)}to{opacity:1;transform:translateY(0)}}
-@keyframes scaleW{from{transform:scaleX(0);opacity:0}to{transform:scaleX(1);opacity:1}}
-@keyframes headerSlide{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
-@keyframes titleSlide{from{opacity:0;transform:translateX(-20px)}to{opacity:1;transform:translateX(0)}}
-@keyframes cardSlideUp{from{opacity:0;transform:translateY(20px)scale(0.98)}to{opacity:1;transform:translateY(0)scale(1)}}
-@keyframes popIn{from{opacity:0;transform:scale(0.95)}to{opacity:1;transform:scale(1)}}
-.is-active .content-card{animation:cardSlideUp 0.45s ease both}
-.is-active .step-unit{animation:cardSlideUp 0.4s ease both}
-.is-active .check-item{animation:cardSlideUp 0.4s ease both}
-.is-active .obj-card-prof{animation:cardSlideUp 0.4s ease both}
-.is-active .archi-module{animation:cardSlideUp 0.4s ease both}
+# ============================================================
+# 设计令牌系统
+# ============================================================
+THEMES = {
+    "slate": {
+        "bg": "#0f1117", "bg2": "#161822", "card": "#1c1f2e",
+        "card2": "#232738", "border": "#2a2e42", "text": "#e8eaed",
+        "text2": "#9ba0b0", "text3": "#5f6577", "accent": "#7c8aff",
+        "accent2": "#ff7a7a", "accent3": "#5ae0c0", "accent4": "#fabc4a",
+        "grad1": "#7c8aff", "grad2": "#a78bfa"
+    },
+    "ocean": {
+        "bg": "#0b1929", "bg2": "#0f2440", "card": "#132a4a",
+        "card2": "#1a3660", "border": "#1e4080", "text": "#e0f0ff",
+        "text2": "#8ab8e0", "text3": "#4a7aaa", "accent": "#4fc3ff",
+        "accent2": "#ff8a80", "accent3": "#69f0ae", "accent4": "#ffd740",
+        "grad1": "#4fc3ff", "grad2": "#7c4dff"
+    },
+    "warm": {
+        "bg": "#1a1410", "bg2": "#221c16", "card": "#2d241c",
+        "card2": "#3a2e24", "border": "#4a3c30", "text": "#efe8e0",
+        "text2": "#c4b8a8", "text3": "#8a7a68", "accent": "#f5a97f",
+        "accent2": "#ed8796", "accent3": "#a6da95", "accent4": "#eed49f",
+        "grad1": "#f5a97f", "grad2": "#c6a0f6"
+    },
+    "forest": {
+        "bg": "#0e1914", "bg2": "#14241c", "card": "#1a3024",
+        "card2": "#224030", "border": "#28503c", "text": "#d8f0e0",
+        "text2": "#8abc9a", "text3": "#4a7a60", "accent": "#7dda58",
+        "accent2": "#ff7a7a", "accent3": "#5ae0c0", "accent4": "#fabc4a",
+        "grad1": "#7dda58", "grad2": "#4fc3ff"
+    }
+}
+DEFAULT_THEME = "slate"
 
-/* === Enhanced Animations === */
-.content-card:hover{transform:translateY(-3px)!important;box-shadow:0 8px 24px rgba(0,0,0,0.08)!important}
-.check-item:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,0.06)}
-.step-unit:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,0.06)}
-.obj-card-prof:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,0.06)}
+def get_theme(name):
+    return THEMES.get(name, THEMES[DEFAULT_THEME])
+
+def esc(t):
+    if t is None: return ""
+    return str(t).replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace(chr(34),"&quot;")
+
+def deco(s):
+    return bool(re.match(r"^[=\-*]{3,}$", s.strip()))
+
+# SVG icons
+SVG_ICONS = {
+    "activity": """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>""",
+    "alert": """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>""",
+    "book": """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>""",
+    "box": """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>""",
+    "check": """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>""",
+    "checkcircle": """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>""",
+    "code": """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>""",
+    "cube": """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="21 16 8 22 3 14 16 8 21 16"/><line x1="3" y1="14" x2="21" y2="16"/><polyline points="8 22 8 8"/><line x1="16" y1="8" x2="16" y2="22"/></svg>""",
+    "database": """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>""",
+    "download": """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>""",
+    "git": """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg>""",
+    "gitbranch": """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>""",
+    "help": """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>""",
+    "layers": """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>""",
+    "lightbulb": """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/></svg>""",
+    "list": """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>""",
+    "node": """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>""",
+    "server": """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>""",
+    "settings": """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>""",
+    "star": """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>""",
+    "target": """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>""",
+    "terminal": """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>""",
+    "zap": """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>""",
+}
+
+def get_icon(title, stype):
+    kw_map = [
+        (["环境","配置","设置","安装","部署","setup","install","requirements"], "settings"),
+        (["代码","示例","实现","函数","code","example","api","编译","构建"], "code"),
+        (["目标","大纲","学习","objectives","goal","目的"], "target"),
+        (["总结","小结","回顾","summary","conclusion"], "check"),
+        (["步骤","流程","工作流","step","workflow"], "layers"),
+        (["架构","设计","结构","architecture","design"], "cube"),
+        (["注意","警告","提示","tip","important"], "alert"),
+        (["常见问题","faq","qanda","帮助"], "help"),
+        (["验证","测试","检查","test","verify"], "checkcircle"),
+        (["维护","运维","更新","升级","update"], "activity"),
+        (["启动","访问","run","start","server","端口"], "node"),
+        (["数据","数据库","database"], "database"),
+        (["硬件","内存","磁盘","cpu","性能"], "cpu"),
+        (["卸载","清理","remove","clear"], "box"),
+        (["集成","integration","skill","插件"], "gitbranch"),
+        (["git","github","clone"], "git"),
+        (["下载","安装包","download"], "download"),
+        (["版本","version","兼容"], "book"),
+        (["文件","目录","结构","folder"], "list"),
+        (["技巧","提示","tip","小贴士"], "lightbulb"),
+    ]
+    for keywords, icon_name in kw_map:
+        if any(k in title.lower() or k in stype.lower() for k in keywords):
+            return SVG_ICONS[icon_name]
+    return SVG_ICONS["node"]
+
+# ============================================================
+# Markdown 解析 (2-pass: 先找section分隔, 再分组)
+# ============================================================
+def parse_md(text):
+    lines = text.strip().split("\n")
+    course_title = "AI教学课程"
+    for r in lines:
+        s = r.strip()
+        if s and not deco(s) and not s.startswith("目录") and not s.startswith("END"):
+            course_title = s.strip("*#\t ")
+            break
+
+    sections = []
+    seen = set()
+    in_toc = False
+    i = 0
+    while i < len(lines):
+        r = lines[i]; s = r.strip()
+        if not s: i += 1; continue
+        if s == "目录：" or s.startswith("目录"):
+            in_toc = True; i += 1; continue
+        if deco(s):
+            if in_toc: in_toc = False
+            i += 1; continue
+        if r.startswith("## "):
+            h = r[3:].strip()
+            if h and h not in seen:
+                sections.append((i, h))
+                seen.add(h)
+            i += 1; continue
+        if re.match(r"^[一二三四五六七八九十]+[、\.\)]\s*\S", s):
+            prev_deco = False
+            for j in range(i-1, -1, -1):
+                p = lines[j].strip()
+                if deco(p): prev_deco = True; break
+                if p: break
+            if prev_deco and not in_toc and s not in seen:
+                sections.append((i, s))
+                seen.add(s)
+            i += 1; continue
+        i += 1
+
+    if not sections:
+        body = [{"type":"text","text": l.strip()} for l in lines if l.strip() and not deco(l)]
+        return {"title": course_title, "slides": [{"title": course_title, "type": "cover", "body": body[:8]}]}
+
+    cover_body = []
+    for r in lines[:sections[0][0]]:
+        s = r.strip()
+        if s and not deco(s) and not s.startswith("目录") and not s.startswith("END"):
+            cover_body.append({"type": "text", "text": s})
+
+    slides = []
+    if cover_body:
+        slides.append({"title": course_title, "type": "cover", "body": cover_body})
+
+    for si, (line_num, heading) in enumerate(sections):
+        end_line = sections[si+1][0] if si+1 < len(sections) else len(lines)
+        tl = heading.lower()
+        stype = "content"
+        if any(k in tl for k in ["环境","配置","设置","requirements"]): stype = "setup"
+        elif any(k in tl for k in ["代码","示例","实现","安装","code"]): stype = "code"
+        elif any(k in tl for k in ["总结","小结","回顾","收尾","summary","conclusion","常见问题","faq"]): stype = "summary"
+        elif any(k in tl for k in ["目标","大纲","学习目标","objectives"]): stype = "objectives"
+        elif any(k in tl for k in ["注意","警告","提示","tip","重要"]): stype = "callout"
+        elif any(k in tl for k in ["步骤","流程","工作流"]): stype = "steps"
+        elif any(k in tl for k in ["架构","设计","结构"]): stype = "architecture"
+        elif any(k in tl for k in ["更新","支持","许可","license"]): stype = "summary"
+
+        body = []
+        in_code = False
+        code_lines = None
+        has_content = False
+
+        for j in range(line_num+1, end_line):
+            r = lines[j]; s = r.strip()
+            if not s or deco(s): continue
+            if s.startswith("```"):
+                if in_code and code_lines is not None:
+                    body.append({"type": "code", "lang": "text", "content": "\n".join(code_lines)})
+                    code_lines = None; has_content = True
+                in_code = not in_code
+                if in_code: code_lines = []
+                continue
+            if in_code and code_lines is not None:
+                code_lines.append(r.rstrip()); continue
+            if s.startswith(("- ","* ","+ ")):
+                body.append({"type": "bullet", "text": s[2:].strip()}); has_content = True; continue
+            if re.match(r"^\d+[\.\)]\s", s):
+                body.append({"type": "bullet", "text": s}); has_content = True; continue
+            if s.startswith("【") and "】" in s:
+                body.append({"type": "text", "text": "■ " + s.strip("【】")}); has_content = True; continue
+            if s.startswith("|") and s.endswith("|"):
+                cols = [c.strip() for c in s.strip("|").split("|")]
+                if len(cols) >= 2: body.append({"type": "table_row", "cols": cols}); has_content = True
+                continue
+            body.append({"type": "text", "text": s}); has_content = True
+
+        if has_content or si == len(sections)-1:
+            slides.append({"title": heading, "type": stype, "body": body})
+
+    return {"title": course_title, "slides": slides}
+
+def build_steps_config(data):
+    configs = []
+    for s in data["slides"]:
+        bullets = [it for it in s.get("body",[]) if it["type"]=="bullet"]
+        codes = [it for it in s.get("body",[]) if it["type"]=="code"]
+        texts = [it for it in s.get("body",[]) if it["type"]=="text"]
+        total = len(bullets) + len(codes) + len(texts)
+        configs.append({"steps": max(1, total), "title": s["title"], "type": s["type"]})
+    return configs
+
+def build_cover(slide, idx, total, course_title, theme):
+    t = THEMES.get(theme, THEMES[DEFAULT_THEME])
+    body = slide.get("body", [])
+    icon_svg = get_icon(course_title, "cover")
+    meta_lines = []
+    for b in body:
+        txt = b.get("text","")
+        if "\u7248\u672c" in txt or ("v" in txt and re.search(r"\d", txt)):
+            meta_lines.append(txt.strip("#*\t "))
+        if "\u9002\u7528" in txt:
+            meta_lines.append(txt.strip("#*\t "))
+    meta_str = " | ".join(meta_lines[:2])
+
+    subtitles = [b.get("text","") for b in body if len(b.get("text","")) > 5 and b.get("text","") != course_title]
+    subtitle = subtitles[0] if subtitles else ""
+
+    dots_html = "".join('<span class="cdot' + (' active"' if i==0 else '"') + '></span>' for i in range(min(total,12)))
+
+    html = '''  <section class="slide cover-slide" data-title="''' + esc(course_title) + '''" data-type="cover">
+    <canvas class="cover-canvas" id="cover-canvas-''' + str(idx) + '''"></canvas>
+    <div class="cover-overlay"></div>
+    <div class="cover-content">
+      <div class="cover-icon-svg">''' + icon_svg + '''</div>
+      <div class="cover-label">AI\u6559\u5b66\u8bfe\u7a0b</div>
+      <h1 class="cover-title">''' + esc(course_title) + '''</h1>
+      <div class="cover-title-underline"></div>
+'''
+    if subtitle:
+        html += '''      <p class="cover-subtitle">''' + esc(subtitle) + '''</p>
+'''
+    html += '''      <div class="cover-meta">''' + esc(meta_str) + '''</div>
+      <div class="cover-dots">''' + dots_html + '''</div>
+    </div>
+    <div class="cover-edge top-edge"></div>
+    <div class="cover-edge bottom-edge"></div>
+  </section>'''
+    return html
+# build_content_slide
+def build_content_slide(slide, idx, total, course_title, theme):
+    t = THEMES.get(theme, THEMES[DEFAULT_THEME])
+    title = slide["title"]
+    stype = slide["type"]
+    body = slide.get("body", [])
+    icon_svg = get_icon(title, stype)
+
+    bullets = [it for it in body if it["type"] == "bullet"]
+    texts = [it for it in body if it["type"] == "text"]
+    codes = [it for it in body if it["type"] == "code"]
+    tables = [it for it in body if it["type"] == "table_row"]
+
+    labels = {'setup':'环境配置','code':'代码示例','steps':'操作步骤','summary':'要点总结','callout':'注意事项','objectives':'学习目标','architecture':'架构分析','content':'正文内容'}
+    label = labels.get(stype, "正文内容")
+
+    lines = []
+    lines.append('  <section class="slide content-slide" data-title="' + esc(title) + '" data-type="' + stype + '">')
+    lines.append('    <div class="slide-bg"></div>')
+    lines.append('    <div class="slide-category"><span class="cat-icon">' + icon_svg + '</span><span class="cat-label">' + esc(label) + '</span></div>')
+    lines.append('    <h2 class="slide-title">' + esc(title) + '</h2>')
+    lines.append('    <div class="slide-title-bar"><span class="bar-fill" style="width:0%%"></span></div>')
+
+    if stype == "code":
+        lines.append('    <div class="code-container">')
+        for tx in texts[:1]:
+            lines.append('      <div class="code-desc step-item">' + esc(tx['text']) + '</div>')
+        for c in codes:
+            lines.append('      <div class="code-block step-item"><div class="code-bar"><span class="cb-dot r"></span><span class="cb-dot y"></span><span class="cb-dot g"></span></div><pre class="code-pre"><code>' + esc(c['content']) + '</code></pre></div>')
+        for b in bullets:
+            lines.append('      <div class="code-annotation step-item"><span class="ca-arrow">\u2192</span> ' + esc(b['text']) + '</div>')
+        lines.append('    </div>')
+
+    elif stype in ("setup", "steps"):
+        lines.append('    <div class="steps-container">')
+        cs = ['#7c8aff','#5ae0c0','#fabc4a','#ff7a7a','#a78bfa','#4fc3ff']
+        for ib, b in enumerate(bullets):
+            cc = cs[ib % 6]
+            lines.append('      <div class="step-item step-row" style="border-color:' + cc + '40"><div class="step-num" style="background:' + cc + '">' + str(ib+1) + '</div><div class="step-text">' + esc(b['text']) + '</div></div>')
+        for tx in texts:
+            lines.append('      <div class="step-item step-note"><span class="sn-icon">\u2192</span> ' + esc(tx['text']) + '</div>')
+        lines.append('    </div>')
+
+    elif stype == "summary":
+        lines.append('    <div class="summary-container">')
+        for b in bullets:
+            lines.append('      <div class="summary-item step-item"><span class="si-check"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><polyline points=\"20 6 9 17 4 12\"/></svg></span><span class="si-text">' + esc(b['text']) + '</span></div>')
+        for tx in texts:
+            lines.append('      <div class="summary-item step-item info"><span class="si-icon">\u24D8</span><span class="si-text">' + esc(tx['text']) + '</span></div>')
+        lines.append('    </div>')
+
+    elif stype == "callout":
+        lines.append('    <div class="callout-container">')
+        lines.append('      <div class="callout-card step-item"><div class="callout-header"><span class="callout-icon">' + SVG_ICONS['alert'] + '</span><span class="callout-title">' + esc(title) + '</span></div><div class="callout-body">')
+        for tx in texts:
+            lines.append('        <p>' + esc(tx['text']) + '</p>')
+        for b in bullets:
+            lines.append('        <div class="callout-point"><span class="cp-dot"></span> ' + esc(b['text']) + '</div>')
+        lines.append('      </div></div></div>')
+
+    elif stype == "architecture":
+        lines.append('    <div class="arch-container">')
+        all_items = bullets + [{'type':'bullet','text':tx['text']} for tx in texts]
+        for ib in range(0, len(all_items), 2):
+            pair = all_items[ib:ib+2]
+            lines.append('      <div class="arch-row step-item">')
+            for item in pair:
+                txt = item['text']
+                for ch in '\u2514\u251c\u2500\u2502': txt = txt.replace(ch, '')
+                lines.append('        <div class="arch-card"><div class="arch-icon">' + SVG_ICONS['box'] + '</div><div class="arch-text">' + esc(txt.strip()) + '</div></div>')
+            lines.append('      </div>')
+        lines.append('    </div>')
+
+    elif stype == "objectives":
+        lines.append('    <div class="obj-container">')
+        cs2 = ['#7c8aff','#5ae0c0','#fabc4a','#ff7a7a']
+        for ib, b in enumerate(bullets):
+            cc = cs2[ib % 4]
+            lines.append('      <div class="obj-card step-item"><div class="obj-num" style="background:' + cc + '20;color:' + cc + '">' + str(ib+1) + '</div><div class="obj-text">' + esc(b['text']) + '</div></div>')
+        lines.append('    </div>')
+
+    else:
+        lines.append('    <div class="content-container">')
+        for tx in texts:
+            if '\u25a0' in tx['text']:
+                lines.append('      <div class="content-section-header step-item">' + esc(tx['text'].replace('\u25a0 ', '')) + '</div>')
+            else:
+                lines.append('      <div class="content-text step-item">' + esc(tx['text']) + '</div>')
+        cs3 = ['#7c8aff','#5ae0c0','#fabc4a','#ff7a7a']
+        for ib, b in enumerate(bullets):
+            lines.append('      <div class="content-bullet step-item"><span class="bullet-dot" style="background:' + cs3[ib%4] + '"></span><span>' + esc(b['text']) + '</span></div>')
+        if tables:
+            lines.append('      <div class="content-table-wrap step-item"><table class="content-table">')
+            for tr in tables:
+                lines.append('        <tr>' + ''.join('<td>' + esc(c) + '</td>' for c in tr['cols']) + '</tr>')
+            lines.append('      </table></div>')
+        for c in codes:
+            lines.append('      <div class="inline-code step-item"><pre>' + esc(c['content']) + '</pre></div>')
+        lines.append('    </div>')
+
+    lines.append('  </section>')
+    return '\n'.join(lines)
+
+def generate_css(theme_name):
+    t = THEMES.get(theme_name, THEMES[DEFAULT_THEME])
+    BG = t['bg']; BG2 = t['bg2']; CARD = t['card']; CARD2 = t['card2']
+    BORDER = t['border']; TXT = t['text']; TXT2 = t['text2']; TXT3 = t['text3']
+    ACC = t['accent']; ACC2 = t['accent2']; ACC3 = t['accent3']; ACC4 = t['accent4']
+    G1 = t['grad1']; G2 = t['grad2']
+    
+    return f'''/* === Video-Native Slide Design v8 === */
+*{{margin:0;padding:0;box-sizing:border-box;}}
+html,body{{width:1920px;height:1080px;overflow:hidden;background:{BG};font-family:"Noto Sans SC",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:{TXT};}}
+.deck{{position:relative;width:1920px;height:1080px;}}
+.slide{{position:absolute;top:0;left:0;width:1920px;height:1080px;overflow:hidden;opacity:0;pointer-events:none;transition:opacity 0.4s ease;}}
+.slide.is-active{{opacity:1;pointer-events:auto;z-index:10;}}
+.slide-bg{{position:absolute;inset:0;background:radial-gradient(ellipse at 30% 20%,{BG2} 0%,{BG} 70%);}}
+.cover-slide{{display:flex;align-items:center;justify-content:center;}}
+.cover-canvas{{position:absolute;inset:0;z-index:1;}}
+.cover-overlay{{position:absolute;inset:0;background:radial-gradient(ellipse at center,transparent 40%,{BG}a0 100%);z-index:2;}}
+.cover-content{{position:relative;z-index:3;text-align:center;max-width:1400px;padding:60px;}}
+.cover-icon-svg{{width:72px;height:72px;margin:0 auto 24px;color:{ACC};opacity:0;animation:fadeScale 0.6s 0.2s ease forwards;}}
+.cover-icon-svg svg{{width:100%;height:100%;}}
+.cover-label{{display:inline-block;font-size:14px;letter-spacing:4px;color:{ACC};border:1px solid {ACC}40;padding:6px 20px;margin-bottom:28px;opacity:0;animation:fadeSlideU 0.5s 0.4s ease forwards;}}
+.cover-title{{font-size:82px;font-weight:700;line-height:1.15;letter-spacing:-1px;margin-bottom:16px;opacity:0;animation:fadeSlideU 0.6s 0.6s ease forwards;}}
+.cover-title-underline{{width:0;height:3px;margin:0 auto 20px;background:linear-gradient(90deg,{G1},{G2});animation:expandW 0.8s 1.0s ease forwards;}}
+.cover-subtitle{{font-size:28px;color:{TXT2};line-height:1.6;margin-bottom:20px;opacity:0;animation:fadeSlideU 0.5s 0.9s ease forwards;}}
+.cover-meta{{font-size:16px;color:{TXT3};margin-top:36px;opacity:0;animation:fadeSlideU 0.4s 1.2s ease forwards;}}
+.cover-dots{{margin-top:40px;display:flex;justify-content:center;gap:8px;opacity:0;animation:fadeSlideU 0.4s 1.4s ease forwards;}}
+.cdot{{width:8px;height:8px;border-radius:50%;background:{TXT3};}}
+.cdot.active{{background:{ACC};}}
+.cover-edge{{position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,{ACC}40,transparent);z-index:2;}}
+.top-edge{{top:0;}}.bottom-edge{{bottom:0;}}
+.slide-category{{position:absolute;top:32px;left:48px;z-index:5;display:flex;align-items:center;gap:10px;opacity:0;animation:fadeSlideU 0.4s 0.1s ease forwards;}}
+.cat-icon{{width:22px;height:22px;color:{ACC};}}
+.cat-icon svg{{width:100%;height:100%;}}
+.cat-label{{font-size:13px;letter-spacing:3px;color:{ACC};}}
+.slide-title{{position:absolute;top:28px;left:48px;right:48px;font-size:52px;font-weight:700;letter-spacing:-0.5px;line-height:1.2;padding-left:34px;z-index:4;opacity:0;animation:fadeSlideU 0.5s 0.15s ease forwards;}}
+.slide-title-bar{{position:absolute;top:92px;left:82px;right:48px;height:2px;background:{BORDER};z-index:4;}}
+.slide-title-bar .bar-fill{{display:block;height:100%;background:linear-gradient(90deg,{G1},{G2});}}
+.content-container,.code-container,.steps-container,.summary-container,.callout-container,.arch-container,.obj-container{{position:absolute;top:120px;left:80px;right:80px;bottom:60px;overflow-y:auto;}}
+.content-container{{padding-top:16px;}}
+.step-item{{opacity:0;transform:translateY(16px);}}
+.step-item.visible{{opacity:1;transform:translateY(0);transition:opacity 0.4s ease,transform 0.4s ease;}}
+.content-text{{font-size:22px;color:{TXT2};line-height:1.7;margin-bottom:14px;}}
+.content-section-header{{font-size:26px;font-weight:600;color:{ACC};margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid {BORDER};}}
+.content-bullet{{display:flex;align-items:flex-start;gap:14px;font-size:24px;line-height:1.6;color:{TXT};margin-bottom:12px;}}
+.bullet-dot{{min-width:10px;min-height:10px;width:10px;height:10px;border-radius:50%;margin-top:10px;}}
+.content-table-wrap{{margin:16px 0;overflow-x:auto;}}
+.content-table{{width:100%;border-collapse:collapse;font-size:18px;}}
+.content-table td{{padding:10px 16px;border-bottom:1px solid {BORDER};color:{TXT2};}}
+.content-table tr:first-child td{{border-top:2px solid {ACC};font-weight:600;color:{TXT};}}
+.inline-code{{background:{CARD};border-radius:6px;padding:16px 20px;margin:10px 0;font-family:'JetBrains Mono',monospace;font-size:15px;overflow-x:auto;color:{ACC3};border:1px solid {BORDER};}}
+.code-container{{display:flex;flex-direction:column;gap:10px;padding-top:12px;}}
+.code-desc{{font-size:22px;color:{TXT2};line-height:1.6;padding-bottom:6px;}}
+.code-block{{border-radius:8px;overflow:hidden;border:1px solid {BORDER};background:{CARD};}}
+.code-bar{{display:flex;align-items:center;gap:8px;padding:10px 16px;background:{CARD2};}}
+.cb-dot{{width:10px;height:10px;border-radius:50%;}}
+.cb-dot.r{{background:#ff5f57;}}.cb-dot.y{{background:#ffbd2e;}}.cb-dot.g{{background:#28c840;}}
+.code-pre{{padding:20px 24px;margin:0;font-family:'JetBrains Mono',monospace;font-size:16px;line-height:1.7;overflow-x:auto;color:{ACC3};}}
+.code-annotation{{font-size:18px;color:{TXT2};display:flex;align-items:center;gap:8px;background:{CARD};padding:10px 16px;border-radius:6px;border:1px solid {BORDER};}}
+.ca-arrow{{color:{ACC};font-size:16px;}}
+.steps-container{{display:flex;flex-direction:column;gap:10px;padding-top:8px;}}
+.step-row{{display:flex;align-items:center;gap:18px;padding:16px 20px;background:{CARD};border-radius:8px;border:1px solid {BORDER};}}
+.step-num{{min-width:36px;min-height:36px;width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#fff;}}
+.step-text{{font-size:22px;line-height:1.5;}}
+.step-note{{display:flex;align-items:center;gap:10px;font-size:20px;color:{TXT2};padding:10px 16px;}}
+.sn-icon{{color:{ACC};}}
+.summary-container{{display:flex;flex-direction:column;gap:12px;padding-top:16px;}}
+.summary-item{{display:flex;align-items:center;gap:16px;padding:14px 20px;border-radius:6px;background:{CARD};border:1px solid {BORDER};}}
+.summary-item.info{{border-color:{ACC}30;}}
+.si-check{{width:26px;min-width:26px;}}
+.si-check svg{{width:26px;height:26px;}}
+.si-icon{{width:26px;height:26px;border-radius:50%;background:{ACC}20;color:{ACC};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;min-width:26px;}}
+.si-text{{font-size:22px;line-height:1.5;}}
+.callout-container{{display:flex;align-items:center;justify-content:center;height:100%;}}
+.callout-card{{max-width:1100px;width:90%;padding:48px 56px;background:linear-gradient(135deg,{CARD},{CARD2});border-radius:12px;border:1px solid {ACC2}40;}}
+.callout-header{{display:flex;align-items:center;gap:14px;margin-bottom:20px;}}
+.callout-icon{{width:32px;height:32px;color:{ACC2};}}
+.callout-icon svg{{width:100%;height:100%;}}
+.callout-title{{font-size:28px;font-weight:600;}}
+.callout-body p{{font-size:22px;color:{TXT2};line-height:1.7;margin-bottom:12px;}}
+.callout-point{{display:flex;align-items:flex-start;gap:10px;font-size:20px;color:{TXT};padding:6px 0;}}
+.cp-dot{{min-width:6px;min-height:6px;width:6px;height:6px;border-radius:50%;background:{ACC2};margin-top:12px;}}
+.arch-container{{display:flex;flex-direction:column;gap:16px;padding-top:16px;}}
+.arch-row{{display:grid;grid-template-columns:1fr 1fr;gap:16px;}}
+.arch-card{{padding:24px;background:{CARD};border-radius:8px;border:1px solid {BORDER};display:flex;align-items:center;gap:16px;}}
+.arch-icon{{width:28px;height:28px;min-width:28px;color:{ACC};}}
+.arch-icon svg{{width:100%;height:100%;}}
+.arch-text{{font-size:20px;line-height:1.5;color:{TXT2};}}
+.obj-container{{display:flex;flex-direction:column;gap:14px;padding-top:24px;}}
+.obj-card{{display:flex;align-items:center;gap:20px;padding:18px 24px;background:{CARD};border-radius:8px;border:1px solid {BORDER};}}
+.obj-num{{width:40px;height:40px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;min-width:40px;}}
+.obj-text{{font-size:24px;line-height:1.5;}}
+@keyframes fadeSlideU{{from{{opacity:0;transform:translateY(20px);}}to{{opacity:1;transform:translateY(0);}}}}
+@keyframes fadeScale{{from{{opacity:0;transform:scale(0.8);}}to{{opacity:1;transform:scale(1);}}}}
+@keyframes expandW{{from{{width:0;}}to{{width:180px;}}}}
+'''
+
+
+# ============================================================
+# Canvas粒子动画 + 步进揭示脚本
+# ============================================================
+CANVAS_SCRIPT = """
+(function() {
+  var canvases = document.querySelectorAll('.cover-canvas');
+  canvases.forEach(function(canvas) {
+    var ctx = canvas.getContext('2d');
+    canvas.width = 1920; canvas.height = 1080;
+    var particles = [];
+    var count = 80;
+    for (var i = 0; i < count; i++) {
+      particles.push({
+        x: Math.random() * 1920, y: Math.random() * 1080,
+        vx: (Math.random() - 0.5) * 0.6,
+        vy: (Math.random() - 0.5) * 0.6,
+        r: Math.random() * 2.5 + 1,
+        a: Math.random() * 0.4 + 0.1
+      });
+    }
+    function draw() {
+      ctx.clearRect(0, 0, 1920, 1080);
+      for (var i = 0; i < count; i++) {
+        var p = particles[i];
+        p.x += p.vx; p.y += p.vy;
+        if (p.x < 0) p.x = 1920; if (p.x > 1920) p.x = 0;
+        if (p.y < 0) p.y = 1080; if (p.y > 1080) p.y = 0;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(124, 138, 255, ' + p.a + ')';
+        ctx.fill();
+        for (var j = i + 1; j < count; j++) {
+          var p2 = particles[j];
+          var dx = p.x - p2.x, dy = p.y - p2.y;
+          var dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < 180) {
+            ctx.beginPath();
+            ctx.moveTo(p.x, p.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.strokeStyle = 'rgba(124, 138, 255, ' + (0.06 * (1 - dist / 180)) + ')';
+            ctx.stroke();
+          }
+        }
+      }
+      requestAnimationFrame(draw);
+    }
+    draw();
+  });
+})();
 """
 
-def build(d,dd=None):
-    sl=d["slides"];n=len(sl);t=d["title"];ar="assets"
-    h=['<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">',
-       '<meta name="viewport" content="width=device-width,initial-scale=1">',
-       f'<title>{t}</title>',
-       f'<link rel="stylesheet" href="{ar}/fonts.css">',
-       f'<link rel="stylesheet" href="{ar}/base.css">',
-       '<link rel="stylesheet" href="style.css">',
-       f'<link rel="stylesheet" id="theme-link" href="{ar}/themes/{DT}.css">',
-       f'</head><body class="" data-themes="{",".join(ALL_T)}" data-theme-base="{ar}/themes/"><div class="deck">']
-    for i,s in enumerate(sl):
-        if s["type"]=="cover"or i==0:sl_=bcover(s,i,n,t)
-        elif(i>1 and i%5==0 or s["type"]=="divider")and len(s.get("body",[]))<3:sl_=bdivider(s,i,n,t)
-        else:sl_=bcontent(s,i,n,t)
-        if i==0:sl_=sl_.replace('class="slide"','class="slide is-active"',1)
-        h.append(sl_)
-    h.append('</div><script src="'+ar+'/runtime.js"></script></body></html>')
-    return"\n".join(h)
+STEP_REVEAL_SCRIPT = """
+window._maxSteps = {};
+window._currentStep = 0;
 
-def ca(dd):
-    import shutil
-    try:
-        s=fa();d=dd/"assets"
-        if d.exists():return
-        d.mkdir(parents=True)
-        for f in["fonts.css","base.css","runtime.js"]:shutil.copy2(s/f,d/f)
-        shutil.copytree(s/"themes",d/"themes",dirs_exist_ok=True)
-    except Exception as e:print(f"Warning: could not copy assets: {e}")
+function resetSteps(slide) {
+  slide.querySelectorAll('.step-item').forEach(function(el) {
+    el.classList.remove('visible');
+  });
+}
 
+function revealAll(slide) {
+  slide.querySelectorAll('.step-item').forEach(function(el) {
+    el.classList.add('visible');
+  });
+}
+
+function advance() {
+  var active = document.querySelector('.is-active');
+  if (!active) return false;
+  var items = active.querySelectorAll('.step-item');
+  if (items.length === 0) return false;
+  var maxVis = -1;
+  items.forEach(function(el, i) {
+    if (el.classList.contains('visible')) maxVis = i;
+  });
+  var next = maxVis + 1;
+  if (next < items.length) {
+    items[next].classList.add('visible');
+    return true;
+  }
+  return false;
+}
+
+// Override go() to reset steps
+if (typeof go === 'function') {
+  var _origGo = go;
+  go = function(n) {
+    var current = document.querySelector('.is-active');
+    if (current) current.classList.remove('is-active');
+    var slides = document.querySelectorAll('.slide');
+    if (n >= 0 && n < slides.length) {
+      slides[n].classList.add('is-active');
+      resetSteps(slides[n]);
+      revealAll(slides[n]);
+    }
+  };
+}
+
+// Show all by default
+document.querySelectorAll('.slide').forEach(function(sl) {
+  revealAll(sl);
+});
+// Activate first slide
+var firstSlide = document.querySelector('.slide');
+if (firstSlide) { firstSlide.classList.add('is-active'); }
+"""
+
+# ============================================================
+# Main build function
+# ============================================================
+def build(data, theme=DEFAULT_THEME):
+    slides = data["slides"]
+    total = len(slides)
+    course_title = data["title"]
+    css = generate_css(theme)
+
+    html_parts = []
+    html_parts.append('<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' + esc(course_title) + '</title><style>' + css + '</style></head><body><div class="deck">')
+
+    for i, s in enumerate(slides):
+        if s["type"] == "cover" or i == 0:
+            slide_html = build_cover(s, i, total, course_title, theme)
+            if i == 0:
+                slide_html = slide_html.replace('class="slide cover-slide"', 'class="slide cover-slide is-active"', 1)
+        else:
+            slide_html = build_content_slide(s, i, total, course_title, theme)
+        html_parts.append(slide_html)
+
+    html_parts.append('</div><script>' + STEP_REVEAL_SCRIPT + CANVAS_SCRIPT + '</script></body></html>')
+    return '\n'.join(html_parts)
+
+# ============================================================
+# CLI entry
+# ============================================================
 def main():
     import argparse
-    ap=argparse.ArgumentParser();ap.add_argument("input");ap.add_argument("--theme",default=DT);ap.add_argument("-o","--output",default=None)
-    a=ap.parse_args()
-    with open(a.input,"r",encoding="utf-8-sig")as f:d=pmd(f.read())
-    sl=re.sub(r'[^\w\u4e00-\u9fff]+','-',d["title"]).strip("-")[:40]or"teaching-deck"
-    dd=(Path(a.output)if a.output else Path("D:/codex/teach-output"))/sl
-    dd.mkdir(parents=True,exist_ok=True)
-    (dd/"index.html").write_text(build(d,dd),encoding="utf-8")
-    (dd/"style.css").write_text(CSS,encoding="utf-8")
-    (dd/"slides.json").write_text(json.dumps(d,ensure_ascii=False,indent=2),encoding="utf-8")
-    ca(dd)
-    print(f"\n=== PPT Generation Complete ===");print(f"Directory: {dd}");print(f"Slides: {len(d['slides'])}")
+    ap = argparse.ArgumentParser(description="AI教学文本 -> 视频原生精美HTML幻灯片 (v8)")
+    ap.add_argument("input", help="输入Markdown教学文本路径")
+    ap.add_argument("--theme", default=DEFAULT_THEME, choices=list(THEMES.keys()), help="主题风格")
+    ap.add_argument("-o", "--output", default=None, help="输出目录")
+    a = ap.parse_args()
 
-if __name__=="__main__":main()
+    with open(a.input, "r", encoding="utf-8-sig") as f_in:
+        data = parse_md(f_in.read())
+
+    slug = re.sub(r'[^\w\u4e00-\u9fff]+', '-', data['title']).strip('-')[:40] or 'teaching-deck'
+    base_dir = Path(a.output) if a.output else Path("D:/codex/teach-output")
+    out_dir = base_dir / slug
+    html = build(data, a.theme)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "index.html").write_text(html, encoding="utf-8")
+
+    slides_json = json.dumps(data, ensure_ascii=False, indent=2)
+    (out_dir / "slides.json").write_text(slides_json, encoding="utf-8")
+
+    steps_config = build_steps_config(data)
+    (out_dir / "steps.json").write_text(json.dumps(steps_config, ensure_ascii=False), encoding="utf-8")
+
+    slide_count = len(data.get("slides", []))
+    print(f"[DONE] {slide_count} slides generated")
+    out_path = str(out_dir)
+    print(f"  Output: {out_path}")
+    course_name = data.get("title", "")
+    print(f"  Course: {course_name}")
+    print(f"  Theme: {a.theme}")
+
+if __name__ == '__main__':
+    main()
